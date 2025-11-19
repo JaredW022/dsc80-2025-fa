@@ -30,8 +30,8 @@ def match_1(string):
     >>> match_1("1b[#d] _")
     True
     """
-    pattern = ...
-
+    pattern = r'^.{2}\[.{2}\]'
+    
     # Do not edit following code
     prog = re.compile(pattern)
     return prog.search(string) is not None
@@ -57,7 +57,7 @@ def match_2(string):
     >>> match_2("(858) 456-7890b")
     False
     """
-    pattern = ...
+    pattern = r'^\(858\) \d{3}\-\d{4}$'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -84,7 +84,7 @@ def match_3(string):
     >>> match_3(" adf!qe? ")
     False
     """
-    pattern = ...
+    pattern = r'^[a-zA-Z0-9\s?]{5,9}\?'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -113,7 +113,7 @@ def match_4(string):
     >>> match_4("$!@$")
     False
     """
-    pattern = ...
+    pattern = r'^\$[^abc$]*\$[aA]+[bB]+[cC]+$'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -132,7 +132,7 @@ def match_5(string):
     >>> match_5("dsc80+.py")
     False
     """
-    pattern = ...
+    pattern = r'^[a-zA-Z0-9_]+\.py$'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -153,7 +153,7 @@ def match_6(string):
     >>> match_6("ABCDEF_ABCD")
     False
     """
-    pattern = ...
+    pattern = r'^[a-z]+_[a-z]+$'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -172,7 +172,7 @@ def match_7(string):
     >>> match_7("_ncde")
     False
     """
-    pattern = ...
+    pattern = r'^_.*_$'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -194,7 +194,7 @@ def match_8(string):
     >>> match_8("ASDJKL9380JKAL")
     True
     """
-    pattern = ...
+    pattern = r'^[^Oi1]+$'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -218,7 +218,7 @@ def match_9(string):
     >>> match_9('TX-32-SAN-4491')
     False
     '''
-    pattern = ...
+    pattern = r'^(CA-\d{2}-(SAN|LAX)-\d{4})|(NY-\d{2}-[A-Z]{3}-\d{4})$'
 
     # Do not edit following code
     prog = re.compile(pattern)
@@ -240,7 +240,10 @@ def match_10(string):
     ['bde']
     
     '''
-    ...
+    string = string.lower()
+    string = re.sub(r'[^\w]|a', "", string)
+    string = re.findall(r'.{3}', string)
+    return string
 
 
 # ---------------------------------------------------------------------
@@ -249,7 +252,21 @@ def match_10(string):
 
 
 def extract_personal(s):
-    ...
+    # check for 2-4 characters after the . -- (Done)
+    email_address = re.findall(r'[\w]+@[\w]+.\w{2,4}', s)
+
+    # need to clean ssns and btc_address: remove ssn: and bitcoin: from the strings -- Done
+    ssns = re.findall(r'ssn:\d{3}-\d{2}-\d{4}', s)
+    ssns = [i.strip("ssns:") for i in ssns]
+
+    # check why some outputs returning 'ull' -- (Need to do)
+    btc_address = re.findall(r'bitcoin:(?!null)[\w]+', s)
+    btc_address = [i.strip("bitcoin:") for i in btc_address]
+
+
+    # clean \xxx at the end of addresses -- (Done)
+    street_address = re.findall(r'\d+ [a-zA-Z ]+', s)
+    return email_address, ssns, btc_address, street_address
 
 
 # ---------------------------------------------------------------------
@@ -258,11 +275,23 @@ def extract_personal(s):
 
 
 def tfidf_data(reviews_ser, review):
-    ...
+    def tokenize(string):
+        review = re.findall(r'\b\w+\b', string)
+        return review
+    counts = np.zeros(len(tokenize(review)))
+    counts_df = pd.DataFrame().assign(cnt=counts).assign(words=tokenize(review)).groupby("words").count()
+    counts_df = counts_df.assign(tf=(counts_df['cnt'] / len(tokenize(review))))
+    idf = {}
+    for word in counts_df["cnt"].index:
+        df = reviews_ser.str.contains(rf'\b{word}\b', case=False).sum()
+        idf[word] = np.log(len(reviews_ser) / df)
+    counts_df = counts_df.assign(idf=pd.Series(idf))
+    counts_df = counts_df.assign(tfidf=counts_df["tf"]*counts_df["idf"])
+    return counts_df
 
 
 def relevant_word(out):
-    ...
+    return out["tfidf"].sort_values(ascending=False).index[0]
 
 
 # ---------------------------------------------------------------------
@@ -271,11 +300,29 @@ def relevant_word(out):
 
 
 def hashtag_list(tweet_text):
-    ...
+    hashtags = []
+    for line in tweet_text:
+        hashtags.append(re.findall(r'#[\w]+', line))
+    return pd.Series([[elem.strip("#") for elem in list] for list in hashtags])
 
 
 def most_common_hashtag(tweet_lists):
-    ...
+    all = []
+    for lst in tweet_lists:
+        all.extend(lst)
+    all = pd.Series(all).value_counts()
+    to_return = []
+    for lst in tweet_lists:
+        if len(lst) == 0:
+            to_return.append(np.nan)
+        elif len(lst) == 1:
+            to_return.append(lst[0])
+        else:
+            dct = {}
+            for elem in lst:
+                dct.update({elem: pd.Series(all).loc[elem]})
+            to_return.append(pd.Series(dct).idxmax())
+    return pd.Series(to_return)
 
 
 # ---------------------------------------------------------------------
@@ -283,10 +330,41 @@ def most_common_hashtag(tweet_lists):
 # ---------------------------------------------------------------------
 
 
-
-
-    
-
-
 def create_features(ira):
-    ...
+    def clean_text(series):
+        cleaned = []
+        for text in series:
+            text = re.sub(r'https?://\S+', ' ', text)
+            text = re.sub(r'^RT', ' ', text)
+            text = re.sub(r'@[a-zA-Z0-9_]+', ' ', text)
+            text = re.sub(r'#[a-zA-Z0-9_]+', ' ', text)
+            text = re.sub(r'[^a-zA-Z0-9 ]', ' ', text)
+            text = text.lower()
+            text = re.sub(r'\s+', ' ', text).strip()
+            cleaned.append(text)
+        return pd.Series(cleaned)
+
+    mod = ira.copy()
+    count_hashtags = hashtag_list(ira["text"]).apply(len)
+    mod = mod.assign(num_hashtags=count_hashtags)
+    mod = mod.assign(mc_hashtags=most_common_hashtag(hashtag_list(ira["text"])))
+
+    ats = []
+    for i in ira["text"]:
+        ats.append(len(re.findall(r'@[a-zA-Z0-9]+', i)))
+    mod = mod.assign(num_tags=ats)
+    links = []
+    for i in ira["text"]:
+        links.append(len(re.findall(r'(https://[\w]+)|(http://[\w]+)', i)))
+    mod = mod.assign(num_links=links)
+    retweet = []
+    for i in ira["text"]:
+        if len(re.findall(r'(^RT)', i)) >= 1:
+            res = True
+        if len(re.findall(r'(^RT)', i)) == 0:
+            res = False
+        retweet.append(res)
+    mod = mod.assign(is_retweet=retweet)
+    return mod.assign(text=clean_text(ira["text"]))
+
+
